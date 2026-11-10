@@ -100,7 +100,7 @@
 <div id="pop"></div>
 <div id="pop2"></div>
 <div id="msg"></div>
-<div id="hint">Tap a glowing ball to pick it up. Swipe up and let go ON the rival to aim there (higher release = higher shot, faster flick = faster ball, curved swipe = curved ball). Gold outline on an incoming ball: tap anywhere to catch it, but the window is short. JUMP to hop over low balls. A ball that hit the floor or a wall is harmless: tap it to grab it. Square pad moves you; the DASH button (bottom right) dashes the way you are moving.</div>
+<div id="hint">Tap a glowing ball to pick it up. Swipe up and let go ON the rival to aim there (higher release = higher shot, faster flick = faster ball, curved swipe = curved ball). Gold outline on an incoming ball: tap the ball itself to catch it. The window is short. JUMP to hop over low balls. A ball that hit the floor or a wall is harmless: tap it to grab it. Square pad moves you; the DASH button (bottom right) dashes the way you are moving.</div>
 <button id="menuBtn">⏸</button>
 <div id="pad"><div id="padKnob"></div></div>
 <div id="ret"></div>
@@ -169,7 +169,7 @@
       <li><b>Throw:</b> swipe up and let go right ON the rival. Release higher for a high shot, lower for a low one. A faster flick = a faster ball. Bend your swipe to curve the ball: the more it bows, the more it curves, and it still lands where you let go. The aim circle shifts from blue to red as your flick gets faster.</li>
       <li><b>Move:</b> drag inside the square pad (WASD on a keyboard).</li>
       <li><b>Dodge:</b> tap the DASH button at the bottom right to burst in the direction you are already moving (Shift on a keyboard). Everything outside the pad is for picking up and throwing.</li>
-      <li><b>Catch:</b> when an incoming ball gets a gold outline, tap anywhere on screen to catch it. The window is short and only opens when the ball is close. Works even while you're holding a ball (you drop it).</li>
+      <li><b>Catch:</b> when an incoming ball gets a gold outline, tap the ball itself to catch it (you have to hit the ball, not just the screen). The window is short and only opens when the ball is close. Your hands must be empty: you can't catch while holding a ball.</li>
       <li><b>Jump:</b> tap JUMP (Space on a keyboard) to hop over low balls.</li>
       <li><b>Grab:</b> a ball that bounced off the floor or a wall is harmless. Tap it directly to pick it up from a distance.</li>
       <li><b>Shoot Hoops:</b> no rival. Free play by default, or pick the 60 second timer (also switchable from the pause menu). Your best scores and streaks are saved under High Scores. Throws work exactly like in the match: swipe up and release ON the hoop, flick speed sets ball speed, curve your swipe to curve it. The rim is solid, so flat shots bounce off it: drop the ball in from above. Shots from beyond the white arc score 3.</li>
@@ -219,6 +219,7 @@ if (typeof THREE === 'undefined') {
 // ---------- constants ----------
 const G = 9.8, RB = 0.35, HW = 8, HL = 16.5, CEIL = 7.5, KM = 0.5, PICK_R = 3.6, CATCH_REACH = 3.6;
 const CEIL_HOOPS = 20, WIN_ROUNDS = 2, DTP = 1 / 120, HOLE_Y = 5.0, HOLE_R = 0.5;
+const THROW_MUL = 1.1025; // overall throw speed (1.05 twice: two 5% bumps)
 const BOARD_Z = -HL + 0.56, RIM = { x: 0, y: 3.9, z: BOARD_Z + 1.1, r: 1.0 }, HOOPS_TIME = 60, ARC_R = 9;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -393,7 +394,7 @@ function checkEliminated() {
 }
 function hitChar(c, b) {
   c.hp--; c.hitT = 0.4; c.pose = 'hit'; c.poseT = 0.4; if (c.ai) { c.ai.winding = false; c.ai.catchPlan = null; }
-  b.live = false; b.vx *= -0.25; b.vz *= -0.25; b.vy = Math.abs(b.vy) * 0.3 + 2.5; b.spin = 0;
+  b.live = false; b.lockUntil = state.t + 0.9; b.vx *= -0.25; b.vz *= -0.25; b.vy = Math.abs(b.vy) * 0.3 + 2.5; b.spin = 0;
   sfx.hit(); state.shake = c === state.pl ? 1 : 0.35; if (app.mode === 'solo' && c === state.pl) state.slow = 0.12; emit('hit');
   if (c.hold) { c.hold.held = null; c.hold.vy = 2; c.hold = null; }
   if (c.hp <= 0) { c.hp = 0; c.ko = true; c.vx = c.vz = 0; c.dash = null; checkEliminated(); }
@@ -431,13 +432,13 @@ function pickup(ch, b) {
   sfx.pick();
 }
 function pickable(ch, b) {
-  if (b.held || b.live) return false;
+  if (b.held || b.live || state.t < (b.lockUntil || 0)) return false;
   if (Math.hypot(b.vx, b.vz) > 4 || b.y > 1.2) return false;
   if (app.mode !== 'hoops' && (ch.team === 0 ? b.z < -0.5 : b.z > 0.5)) return false;
   return Math.hypot(b.x - ch.x, b.z - ch.z) <= PICK_R;
 }
 function grabbable(ch, b) {
-  if (b.held || b.live || app.mode === 'hoops' || b.y > 3.5) return false;
+  if (b.held || b.live || state.t < (b.lockUntil || 0) || app.mode === 'hoops' || b.y > 3.5) return false;
   if (ch.team === 0 ? b.z < -0.5 : b.z > 0.5) return false;
   return Math.hypot(b.x - ch.x, b.z - ch.z) <= 7.5;
 }
@@ -474,7 +475,7 @@ function solveThrow(ch, target, v, spin) {
 }
 function doThrow(ch, sw, tgt) {
   const b = ch.hold; if (!b || ch.ko || state.phase !== 'play') return false;
-  const v = lerp(12, 28, sw.p);
+  const v = lerp(12, 28, sw.p) * THROW_MUL;
   let yaw = sw.yaw, pitch;
   if (tgt) { const sol = solveThrow(ch, tgt, v, sw.spin); yaw = sol.yaw; pitch = sol.pitch; }
   else pitch = 0.5 * Math.asin(clamp(22 * G / (v * v), 0.05, 0.98));
@@ -571,7 +572,7 @@ function planAICatch(def, b) {
   const p = Math.min(0.85, a.d.catch * (repetitive() ? 1.8 : 1));
   if (Math.random() < p) a.catchPlan = { b, t: rand(a.d.cdel[0], a.d.cdel[1]) };
 }
-function canCatchHolding(c) { return !c.ai; }
+function canCatchHolding(c) { return false; } // hands must be empty to catch
 function updateCatchWindows() {
   state.catchWin = false;
   const chars = state.chars, pi = chars.indexOf(state.pl);
@@ -717,14 +718,14 @@ function aiUpdate(ai, dt) {
             if (!foes.length) { /* nothing to throw at */ }
             else if (downMate && Math.random() < 0.5) {
               // go for the revive hole on the far wall
-              const v = rand(20, 26), tt = Math.abs((s === 1 ? -HL : HL) - ai.z) / (v * 0.85);
+              const v = rand(20, 26) * THROW_MUL, tt = Math.abs((s === 1 ? -HL : HL) - ai.z) / (v * 0.85);
               const target = { x: holeXAt(ai.team, state.holeT + tt) + rand(-0.25, 0.25) * (d.sigma / 1.2), y: HOLE_Y, z: (s === 1 ? -1 : 1) * (HL - RB * 1.2) };
               const sol = solveThrow(ai, target, v, 0);
               launch(ai, ai.hold, sol.yaw, sol.pitch, v, 0);
             } else {
               const tg = foes[(Math.random() * foes.length) | 0], t = Math.abs(tg.z - ai.z) / 18;
               const target = { x: tg.x + tg.vx * t * 0.9 + app.mem.bias * 0.5 * d.adapt + rand(-1, 1) * d.sigma, z: tg.z };
-              const v = rand(d.vr[0], d.vr[1]), spin = rand(-d.curve, d.curve);
+              const v = rand(d.vr[0], d.vr[1]) * THROW_MUL, spin = rand(-d.curve, d.curve);
               const sol = solveThrow(ai, target, v, spin);
               launch(ai, ai.hold, sol.yaw, sol.pitch, v, spin);
               a.watch = { t: 0.9, c: tg, x0: tg.x, vx0: tg.vx };
@@ -1250,6 +1251,25 @@ function markerFor(c, i) {
   m.scale.setScalar(c === state.pl ? 1.15 + 0.06 * Math.sin(state.t * 6) : 1);
 }
 
+const nameCache = {};
+function nameTex(text, color) {
+  const k = text + color; if (nameCache[k]) return nameCache[k];
+  return (nameCache[k] = canvasTex(256, 64, (g, w, h) => {
+    g.font = 'bold 34px system-ui,-apple-system,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 7; g.lineJoin = 'round'; g.strokeStyle = 'rgba(8,5,18,0.9)'; g.strokeText(text, w / 2, h / 2 + 2);
+    g.fillStyle = color; g.fillText(text, w / 2, h / 2 + 2);
+  }));
+}
+const nameSprites = [0, 1, 2, 3, 4, 5].map(() => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: null, transparent: true, depthTest: false })); s.renderOrder = 12; s.visible = false; scene.add(s); return s; });
+function nameFor(c, i) {
+  const s = nameSprites[i];
+  if (c === state.pl || c.ko) { s.visible = false; return; }
+  const bot = c.id >= 100, text = bot ? '🤖 Bot' : 'Player ' + (c.id + 1), color = c.team === state.pl.team ? '#9cc8ff' : '#ff9d8e';
+  const tex = nameTex(text, color);
+  if (s.material.map !== tex) { s.material.map = tex; s.material.needsUpdate = true; }
+  s.scale.set(1.7, 0.425, 1); s.position.set(c.x, c.y + 2.5, c.z); s.visible = true;
+}
+
 const SPN = 40;
 const spLP = new Float32Array(SPN * 6), spLC = new Float32Array(SPN * 6), spPP = new Float32Array(SPN * 3), spPC = new Float32Array(SPN * 3);
 const spLG = new THREE.BufferGeometry(), spPG = new THREE.BufferGeometry();
@@ -1325,7 +1345,7 @@ window.addEventListener('resize', resize);
 
 function spriteFor(c, i) {
   const s = sprites[i], viewName = c.team === 0 ? 'back' : 'front';
-  s.visible = true; charShadows[i].visible = true; markerFor(c, i);
+  s.visible = true; charShadows[i].visible = true; markerFor(c, i); nameFor(c, i);
   const pose = c.poseT > 0 ? c.pose : (c.winding ? 'windup' : 'idle');
   const art = artTex(viewName, pose);
   s.material.map = figTex(viewName, pose, c.team);
@@ -1347,7 +1367,7 @@ function spriteFor(c, i) {
 function render(now) {
   const pl = state.pl, menu = app.mode === 'menu';
   state.chars.forEach((c, i) => spriteFor(c, i));
-  for (let i = state.chars.length; i < sprites.length; i++) { sprites[i].visible = false; charShadows[i].visible = false; markers[i].visible = false; }
+  for (let i = state.chars.length; i < sprites.length; i++) { sprites[i].visible = false; charShadows[i].visible = false; markers[i].visible = false; nameSprites[i].visible = false; }
   renderHoles(now);
   syncBallMeshes(false);
   threeArc.visible = app.mode === 'hoops';
@@ -1531,7 +1551,7 @@ function pickGold(cx, cy) {
     const d = Math.hypot(sx - cx, sy - cy) / Math.max(26, rpx * 1.5);
     if (d < bd) { bd = d; best = b; }
   }
-  return best; // any tap catches while a ball is outlined
+  return bd < 1 ? best : null; // you have to hit the ball itself
 }
 function tapPick(e) { if (!state.pl.hold && state.phase === 'play') { const b = pickBall(e.clientX, e.clientY); if (b) actPickup(b); } }
 function dashNow() {
@@ -1611,7 +1631,6 @@ window.addEventListener('keydown', e => {
   if (app.mode === 'menu' || app.paused) return;
   if (k === 'shift') dashNow();
   if (k === ' ') { e.preventDefault(); actJump(); }
-  if ((k === 'f' || k === 'c') && state.phase === 'play') { const gb = pickGold(0, 0); if (gb) { e.preventDefault(); actCatch(gb); } }
   if (k === 'e' && !state.pl.hold && state.phase === 'play') {
     let best = null, bd = 1e9;
     for (const b of state.balls) if (pickable(state.pl, b)) { const d = Math.hypot(b.x - state.pl.x, b.z - state.pl.z); if (d < bd) { bd = d; best = b; } }
@@ -1702,7 +1721,7 @@ function frame(now) {
 try {
   const coarse = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
   bodyClass('touch', !!coarse);
-  if (!coarse) $('hint').textContent = 'WASD / arrows move · Shift dodges · E picks up the nearest ball (or click it) · click and drag up, release ON the rival to throw · SPACE jumps · F or click catches a gold-outlined ball';
+  if (!coarse) $('hint').textContent = 'WASD / arrows move · Shift dodges · E picks up the nearest ball (or click it) · click and drag up, release ON the rival to throw · SPACE jumps · click the gold-outlined ball to catch it';
 } catch (e) {}
 const HINT_SOLO = $('hint').textContent;
 for (const v of ['front', 'back']) for (const p of ['idle', 'windup', 'throw', 'catch', 'hit']) artTex(v, p);

@@ -14,7 +14,7 @@ Needs an internet connection to load the three.js library from a CDN.
 
 Controls
   Move: WASD / arrows (or the pad on a phone)    Dash: Shift / DASH button
-  Jump: Space / JUMP button                       Catch: tap anywhere (or F / C) while a ball is gold-outlined
+  Jump: Space / JUMP button                       Catch: tap/click directly on the ball while it is gold-outlined
   Pick up: tap a ball (or E). Dead balls (touched floor or wall) can be grabbed by tapping them directly.
   Throw: swipe up and release ON the target.
 Team games: knock out the whole other team to win a round. A glowing hole slides along the far wall:
