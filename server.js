@@ -1,6 +1,6 @@
 // Doodles Stickman Dodgeball: tiny server (no installs needed, just Node 16+).
 // Run:  node server.js     then open http://localhost:3000
-// It serves index.html and relays online 1v1 messages over a WebSocket at /ws.
+// It serves index.html and runs online rooms (up to 6 players) over a WebSocket at /ws.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -31,7 +31,8 @@ function send(sock, obj) {
   sock.write(Buffer.concat([h, p]));
 }
 
-const rooms = new Map(); // code -> { host, guest }
+// ---- rooms: the host (id 0, team 0) runs the match; guests (ids 1-5) send inputs and get snapshots ----
+const rooms = new Map(); // code -> { code, host, guests: Map(id -> sock), size, started }
 function newCode() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   for (;;) {
@@ -39,31 +40,61 @@ function newCode() {
     if (!rooms.has(c)) return c;
   }
 }
+const players = r => [{ id: 0, team: 0 }].concat([...r.guests.entries()].sort((a, b) => a[0] - b[0]).map(([id, s]) => ({ id, team: s.team })));
+const teamCount = (r, team) => players(r).filter(p => p.team === team).length;
+const everyone = r => [r.host, ...r.guests.values()];
+const lobby = r => ({ t: 'lobby', size: r.size, players: players(r) });
+function broadcastLobby(r) { const m = lobby(r); everyone(r).forEach(s => send(s, m)); }
 function leave(sock) {
   const r = sock.room; if (!r) return;
   sock.room = null;
-  const other = sock.role === 'host' ? r.guest : r.host;
-  if (other) { send(other, { t: 'peerleft' }); other.room = null; }
-  rooms.delete(r.code);
+  if (sock.role === 'host') {
+    for (const g of r.guests.values()) { send(g, { t: 'hostleft' }); g.room = null; }
+    rooms.delete(r.code);
+  } else {
+    r.guests.delete(sock.id);
+    if (r.started) send(r.host, { t: 'left', id: sock.id }); else broadcastLobby(r);
+  }
 }
 function onMessage(sock, text) {
   let m; try { m = JSON.parse(text); } catch (e) { return; }
+  const r = sock.room;
   if (m.t === 'create') {
     leave(sock);
-    const code = newCode(), r = { code, host: sock, guest: null };
-    rooms.set(code, r); sock.room = r; sock.role = 'host';
-    send(sock, { t: 'created', code });
+    const code = newCode(), room = { code, host: sock, guests: new Map(), size: Math.min(3, Math.max(1, m.size | 0 || 3)), started: false };
+    rooms.set(code, room); sock.room = room; sock.role = 'host'; sock.id = 0; sock.team = 0;
+    send(sock, { t: 'created', code, id: 0 }); broadcastLobby(room);
   } else if (m.t === 'join') {
-    const code = String(m.code || '').toUpperCase().trim(), r = rooms.get(code);
-    if (!r) return send(sock, { t: 'err', msg: 'No room with that code.' });
-    if (r.guest) return send(sock, { t: 'err', msg: 'That room is full.' });
+    const code = String(m.code || '').toUpperCase().trim(), room = rooms.get(code);
+    if (!room) return send(sock, { t: 'err', msg: 'No room with that code.' });
+    if (room.started) return send(sock, { t: 'err', msg: 'That match already started.' });
+    const c0 = teamCount(room, 0), c1 = teamCount(room, 1);
+    let team = c1 <= c0 ? 1 : 0;
+    if ((team === 1 ? c1 : c0) >= room.size) team = 1 - team;
+    if ((team === 1 ? c1 : c0) >= room.size) return send(sock, { t: 'err', msg: 'That room is full.' });
     leave(sock);
-    r.guest = sock; sock.room = r; sock.role = 'guest';
-    send(sock, { t: 'joined', code });
-    send(r.host, { t: 'peer' });
-  } else if (sock.room) {
-    const r = sock.room, other = sock.role === 'host' ? r.guest : r.host;
-    if (other) send(other, m); // everything else is relayed to the other player
+    let id = 1; while (room.guests.has(id)) id++;
+    sock.room = room; sock.role = 'guest'; sock.id = id; sock.team = team; room.guests.set(id, sock);
+    send(sock, { t: 'joined', code, id }); broadcastLobby(room);
+  } else if (!r) {
+    return;
+  } else if (m.t === 'size' && sock.role === 'host' && !r.started) {
+    const n = Math.min(3, Math.max(1, m.n | 0));
+    if (n < Math.max(teamCount(r, 0), teamCount(r, 1))) return send(sock, { t: 'err', msg: 'Too many players for that size.' });
+    r.size = n; broadcastLobby(r);
+  } else if (m.t === 'team' && sock.role === 'guest' && !r.started) {
+    const to = 1 - sock.team;
+    if (teamCount(r, to) >= r.size) return send(sock, { t: 'err', msg: 'That team is full.' });
+    sock.team = to; broadcastLobby(r);
+  } else if (m.t === 'start' && sock.role === 'host') {
+    if (players(r).length < 2) return send(sock, { t: 'err', msg: 'Need at least 2 players.' });
+    r.started = true;
+    const base = { t: 'start', size: r.size, players: players(r) };
+    everyone(r).forEach(s => send(s, Object.assign({ you: s.id }, base)));
+  } else if (!['create', 'join', 'size', 'team', 'start'].includes(m.t)) {
+    // everything else is gameplay traffic: host -> all guests, guest -> host (tagged with who sent it)
+    if (sock.role === 'host') for (const g of r.guests.values()) send(g, m);
+    else { m.from = sock.id; send(r.host, m); }
   }
 }
 
