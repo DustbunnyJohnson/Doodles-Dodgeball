@@ -265,6 +265,7 @@ const gest = { active: false, pts: [], ox: 0, oy: 0 };
 const pad = { on: false, id: null, x: 0, z: 0 };
 let CW = 800, CH = 450;
 
+const isTouch = () => { try { return document.body.classList.contains('touch'); } catch (e) { return false; } };
 function bodyClass(name, on) { try { document.body.classList[on ? 'add' : 'remove'](name); } catch (e) {} }
 function emit(...a) { if (app.mode === 'host') state.events.push(a); }
 
@@ -603,10 +604,12 @@ function updateCatchWindows() {
       const tt = (def.z - b.z) / b.vz;
       if (tt > 0 && Math.hypot(b.x - def.x, b.y - 1.1 - def.y, b.z - def.z) <= CATCH_REACH) {
         const px = b.x + b.vx * tt + 0.5 * (KM * b.spin * (-b.vz)) * tt * tt, py = b.y + b.vy * tt - 0.5 * G * tt * tt;
-        if (Math.abs(px - def.x) < 1.6 && py > 0.2 + def.y && py < 2.8 + def.y) { on[i] = true; if (def.ai) planAICatch(def, b); }
+        const tw = isTouch() ? 2.4 : 1.6; if (Math.abs(px - def.x) < tw && py > (isTouch() ? -0.2 : 0.2) + def.y && py < (isTouch() ? 3.4 : 2.8) + def.y) { on[i] = true; if (def.ai) planAICatch(def, b); }
       }
     });
     b.gon = on; b.gold = !!on[pi]; b.goldOn = b.gold;
+    if (b.gold && !b._gp && isTouch() && state.pl && !state.pl.ko) showPop('TAP ANYWHERE TO CATCH!', 900);
+    b._gp = b.gold;
     if (b.gold && app.mode === 'solo') state.catchWin = true;
   }
 }
@@ -1785,7 +1788,7 @@ function pickGold(cx, cy) {
     const sx = (v.x * 0.5 + 0.5) * CW, sy = (-v.y * 0.5 + 0.5) * CH;
     v.set(b.x, b.y + RB, b.z).project(cam);
     const rpx = Math.abs((-v.y * 0.5 + 0.5) * CH - sy);
-    const d = Math.hypot(sx - cx, sy - cy) / Math.max(26, rpx * 1.5);
+    const d = Math.hypot(sx - cx, sy - cy) / Math.max(isTouch() ? 90 : 44, rpx * (isTouch() ? 3 : 2.2));
     if (d < bd) { bd = d; best = b; }
   }
   return bd < 1 ? best : null; // you have to hit the ball itself
@@ -1823,7 +1826,9 @@ canvas.addEventListener('pointerdown', e => {
   bodyClass('touch', e.pointerType !== 'mouse');
   if (app.mode === 'menu' || app.paused || state.phase !== 'play') return;
   const ch = state.pl; if (ch.ko) return;
-  { const gb = pickGold(e.clientX, e.clientY); if (gb) { actCatch(gb); return; } }
+  { let gb = pickGold(e.clientX, e.clientY);
+    if (!gb && e.pointerType !== 'mouse') { let bd = 1e9; for (const b of state.balls) { if (!b.gold || b.team !== 1) continue; const d = Math.hypot(b.x - ch.x, b.z - ch.z); if (d < bd) { bd = d; gb = b; } } }
+    if (gb) { actCatch(gb); if (!(e.pointerType !== 'mouse' && inMoveZone(e.clientX, e.clientY))) return; } }
   if (e.pointerType !== 'mouse' && inMoveZone(e.clientX, e.clientY)) {
     if (!pad.on) { pad.on = true; pad.id = e.pointerId; padEl.style.opacity = 1; padMove(e); try { canvas.setPointerCapture(e.pointerId); } catch (err) {} }
     return;
@@ -1942,7 +1947,7 @@ function simFrame(dtReal, nowMs) {
   if (app.mode === 'menu') { state.t += dtReal; return; }
   if (app.paused && (app.mode === 'solo' || app.mode === 'hoops')) return;
   const online = app.mode === 'host' || app.mode === 'guest';
-  const ts = (!online && state.slow > 0) ? 0.3 : ((!online && state.catchWin) ? 0.4 : 1);
+  const ts = (!online && state.slow > 0) ? 0.3 : ((!online && state.catchWin) ? (isTouch() ? 0.3 : 0.4) : 1);
   state.slow = Math.max(0, state.slow - dtReal); state.shake = Math.max(0, state.shake - dtReal * 3);
   acc += dtReal * ts;
   while (acc >= DTP) { if (app.mode === 'guest') guestUpdate(DTP); else update(DTP); acc -= DTP; }
