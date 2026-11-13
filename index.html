@@ -205,6 +205,15 @@
   .acell img{width:100%;height:64px;object-fit:contain;background:#fff8e4;border-radius:6px}
   .acell .sw{height:64px;border-radius:6px}
   #edInspX{order:2}
+  .edb:disabled{opacity:.35}
+  .nd .nh .nplay{margin-left:auto;background:#0005;border-radius:6px;padding:0 8px;font-size:12px;cursor:pointer;line-height:18px}
+  .nd.t-set .nh{background:#1f8a8a}.nd.t-if .nh{background:#a8478f}
+  .nd.bad:not(.sel){border-color:#ff5a5a;box-shadow:0 0 0 3px #ff5a5a66,4px 5px 0 #0007}
+  .nd.unr{opacity:.55}
+  #edAdd{flex-wrap:wrap;max-width:calc(100% - 16px)}
+  #edBackTest{position:fixed;top:100px;right:10px;z-index:60;background:#2a2033e6;color:#ffd23f;border:2px solid #ffd23f;border-radius:10px;padding:6px 10px;font-size:13px;font-weight:800;font-family:inherit}
+  .lintrow{display:flex;gap:8px;align-items:center;margin:5px 0;padding:6px 8px;background:#1b1830;border:1px solid #4a4270;border-radius:8px;font-size:12px}
+  .lintrow span{flex:1}
   @media (max-width:760px),(max-height:520px){
     #edInsp{left:0;right:0;top:0;bottom:0;width:auto;z-index:8;border-left:0}
     #ed.insp #edZoom{right:8px}
@@ -232,6 +241,7 @@
 <canvas id="confetti"></canvas>
 <div id="hint">Tap a glowing ball to pick it up. Swipe up and let go ON the rival to aim there (higher release = higher shot, faster flick = faster ball, curved swipe = curved ball). Gold outline on an incoming ball: tap the ball itself to catch it. The window is short. JUMP to hop over low balls. A ball that hit the floor or a wall is harmless. Square pad moves you; the DASH button (bottom right) dashes the way you are moving.</div>
 <button id="menuBtn">⏸</button>
+<button id="edBackTest" hidden>◀ Back to editor</button>
 <div id="pad"><div id="padKnob"></div></div>
 <div id="ret"></div>
 <button id="dashBtn">DASH</button>
@@ -370,13 +380,17 @@
     <button class="edb" id="edClose">&#10005;</button>
     <input id="edName" placeholder="Campaign name">
     <span id="edStat"></span>
+    <button class="edb" id="edUndo" disabled title="Undo">&#8630;</button>
+    <button class="edb" id="edRedo" disabled title="Redo">&#8631;</button>
     <button class="edb go" id="edTestSel">&#9654; From here</button>
     <button class="edb go" id="edTestAll">&#9654; Play all</button>
+    <button class="edb" id="edVarBtn">&#120165; Vars</button>
+    <button class="edb" id="edChkBtn">&#10004; Check</button>
     <button class="edb" id="edFileBtn">&#128193; File</button>
   </div>
   <div id="edView"><div id="edWorld"><svg id="edWires"></svg><div id="edNodes"></div></div></div>
   <div id="edAdd">
-    <button class="edb" data-add="scene">+ Scene</button><button class="edb" data-add="choice">+ Choice</button><button class="edb" data-add="match">+ Match</button><button class="edb" data-add="card">+ Card</button><button class="edb" data-add="end">+ End</button>
+    <button class="edb" data-add="scene">+ Scene</button><button class="edb" data-add="choice">+ Choice</button><button class="edb" data-add="match">+ Match</button><button class="edb" data-add="card">+ Card</button><button class="edb" data-add="set">+ Set</button><button class="edb" data-add="if">+ If</button><button class="edb" data-add="end">+ End</button>
   </div>
   <div id="edZoom"><button class="edb" id="zIn">+</button><button class="edb" id="zOut">&minus;</button><button class="edb" id="zFit">&#10529;</button></div>
   <div id="edInsp" hidden><div id="edInspHead"><b id="edInspTitle"></b><button class="edb" id="edInspX">&#10005;</button></div><div id="edInspBody"></div></div>
@@ -397,7 +411,19 @@ if (typeof THREE === 'undefined') {
 // ---------- constants ----------
 const G = 9.8, RB = 0.35, HW = 8, HL = 16.5, CEIL = 7.5, KM = 0.5, PICK_R = 3.6, CATCH_REACH = 3.6;
 let WIN_ROUNDS = 2; const CEIL_HOOPS = 20, DTP = 1 / 120, HOLE_Y = 5.0, HOLE_R = 0.7; // revive hole: twice as wide as the ball (0.7 x 2 = 1.4 across)
-const THROW_MUL = 1.1025; // overall throw speed (1.05 twice: two 5% bumps)
+const PERFECT_BOOST = 1.1; // a glowing (perfect-catch) ball is thrown 10% faster and cannot be caught
+const THROW_BASE = 1.1025; let THROW_MUL = THROW_BASE; // overall throw speed (1.05 twice: two 5% bumps); story matches can scale it
+// per-match rules set by a story match node (defaults = the normal game)
+const MX = { hp: 3, speed: 1, balls: 0, rate: 1, hoop: true, fight: '', hold: false };
+function mxReset() { MX.hp = 3; MX.speed = 1; MX.balls = 0; MX.rate = 1; MX.hoop = true; MX.fight = ''; MX.hold = false; THROW_MUL = THROW_BASE; }
+function mxSet(m) {
+  m = m || {};
+  MX.hp = Math.max(1, Math.min(6, Math.round(+m.hp || 3)));
+  MX.speed = Math.max(0.6, Math.min(1.5, +m.speed || 1)); THROW_MUL = THROW_BASE * MX.speed;
+  MX.balls = Math.max(-1, Math.min(2, Math.round(+m.balls || 0)));
+  MX.rate = Math.max(0.5, Math.min(2, +m.rate || 1));
+  MX.hoop = m.hoop !== false; MX.fight = String(m.fight || '').slice(0, 18); MX.hold = !!m.hold;
+}
 const BOARD_Z = -HL + 0.56, RIM = { x: 0, y: 3.9, z: BOARD_Z + 1.1, r: 1.0 }, HOOPS_TIME = 60, ARC_R = 9;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -429,11 +455,11 @@ function emit(...a) { if (app.mode === 'host') state.events.push(a); }
 
 // ---------- characters & balls ----------
 function mkAIState() {
-  const d = DIFFS[app.diff];
+  const d0 = DIFFS[app.diff], d = MX.rate === 1 ? d0 : Object.assign({}, d0, { cool: [d0.cool[0] / MX.rate, d0.cool[1] / MX.rate] });
   return { d, cool: rand(d.cool[0], d.cool[1]) + 0.8, windT: 0, winding: false, dodgeT: 0, dodgeDir: 1, dodgeCool: 0, tx: 0, tT: 0, watch: null, catchPlan: null };
 }
 function mkChar(team, x, id, isAI) {
-  return { team, id, lane: x, x, z: team === 0 ? 11 : -11, y: 0, vy: 0, vx: 0, vz: 0, hp: 3, hold: null, pose: 'idle', poseT: 0, hitT: 0, ko: false, winding: false,
+  return { team, id, lane: x, x, z: team === 0 ? 11 : -11, y: 0, vy: 0, vx: 0, vz: 0, hp: MX.hp, hold: null, pose: 'idle', poseT: 0, hitT: 0, ko: false, winding: false,
     dash: null, dashCD: 0, catchT: 0, rin: { ix: 0, iz: 0 }, rwind: false, ai: isAI ? mkAIState() : null };
 }
 const SLOT_X = { 1: [0], 2: [-2.6, 2.6], 3: [0, -4.8, 4.8] };
@@ -457,12 +483,17 @@ function mkBall(x, z) {
 function makeBalls() {
   const L = [[-5, 3.2], [5, 3.2], [0, 5.5], [-5, -3.2], [5, -3.2], [0, -5.5]];
   if (app.mode !== 'hoops' && app.roster.size > 1) L.push([0, 8.4], [0, -8.4]);
+  if (app.mode !== 'hoops') {
+    if (MX.balls < 0) { L.splice(5, 1); L.splice(2, 1); }
+    for (let i = 0; i < MX.balls; i++) { const sx = i % 2 ? 1 : -1, zz = 7 + (i >> 1) * 1.6; L.push([sx * 2.6, zz], [sx * 2.6, -zz]); }
+  }
   return L.map(a => mkBall(a[0], a[1]));
 }
 function resetRound() {
   state.chars = app.mode === 'hoops' ? [mkChar(0, 0, app.myId, false)] : buildChars(app.mode === 'guest' && app.myTeam === 1);
   state.pl = state.chars.find(c => c.id === app.myId) || state.chars[0];
   state.balls = makeBalls();
+  if (MX.hold && app.mode === 'solo' && state.pl && state.balls[0]) { state.balls[0].x = state.pl.x; state.balls[0].z = state.pl.z - 1; pickup(state.pl, state.balls[0]); }
   state.winner = -1; state.overT = 0; state.shake = 0; state.burst = null; state.catchWin = false; state.events = [];
   gest.active = false; gest.pts = []; guestLock = 0;
   try { $('ret').style.display = 'none'; } catch (e) {}
@@ -590,10 +621,10 @@ function hitChar(c, b) {
 }
 function holeXAt(team, tt) { return 0; } // the revive hole stays still, centered on the back wall
 function updateHoles() { state.holes[0].x = holeXAt(0, state.holeT); state.holes[1].x = holeXAt(1, state.holeT); }
-function holeActive(team) { return app.mode !== 'hoops' && state.phase === 'play' && state.chars.some(c => c.team === team && c.ko); }
+function holeActive(team) { return app.mode !== 'hoops' && MX.hoop && state.phase === 'play' && state.chars.some(c => c.team === team && c.ko); }
 function reviveTeam(team) {
   const c = state.chars.find(x => x.team === team && x.ko); if (!c) return false;
-  c.ko = false; c.hp = 3; c.hitT = 0; c.hold = null; c.vx = c.vz = 0; c.y = 0; c.vy = 0; c.dash = null; c.pose = 'idle'; c.poseT = 0;
+  c.ko = false; c.hp = MX.hp; c.hitT = 0; c.hold = null; c.vx = c.vz = 0; c.y = 0; c.vy = 0; c.dash = null; c.pose = 'idle'; c.poseT = 0;
   c.x = c.lane; c.z = team === 0 ? 11 : -11;
   emit('revive', team, state.chars.indexOf(c)); onRevive(team, state.chars.indexOf(c));
   return true;
@@ -659,7 +690,7 @@ function solveThrow(ch, target, v, spin) {
 }
 function doThrow(ch, sw, tgt) {
   const b = ch.hold; if (!b || ch.ko || state.phase !== 'play') return false;
-  const v = lerp(12, 28, sw.p) * THROW_MUL;
+  const v = lerp(12, 28, sw.p) * THROW_MUL * (b.glow ? PERFECT_BOOST : 1); // a perfect-catch ball flies 10% faster
   let yaw = sw.yaw, pitch;
   if (tgt) { const sol = solveThrow(ch, tgt, v, sw.spin); yaw = sol.yaw; pitch = sol.pitch; }
   else pitch = 0.5 * Math.asin(clamp(22 * G / (v * v), 0.05, 0.98));
@@ -761,7 +792,7 @@ function updateCatchWindows() {
   state.catchWin = false;
   const chars = state.chars, pi = chars.indexOf(state.pl);
   for (const b of state.balls) {
-    if (!b.live || b.held || b.team < 0) { b.gold = false; b.goldOn = false; b.gon = null; continue; }
+    if (!b.live || b.held || b.team < 0 || b.glow) { b.gold = false; b.goldOn = false; b.gon = null; continue; }
     const on = {}, prev = b.gon || {};
     chars.forEach((def, i) => {
       if (def.team === b.team || def.ko) return;
@@ -918,14 +949,14 @@ function aiUpdate(ai, dt) {
             if (!foes.length) { /* nothing to throw at */ }
             else if (downMate && Math.random() < 0.5) {
               // go for the revive hole on the far wall
-              const v = rand(20, 26) * THROW_MUL, tt = Math.abs((s === 1 ? -HL : HL) - ai.z) / (v * 0.85);
+              const v = rand(20, 26) * THROW_MUL * (ai.hold.glow ? PERFECT_BOOST : 1), tt = Math.abs((s === 1 ? -HL : HL) - ai.z) / (v * 0.85);
               const target = { x: holeXAt(ai.team, state.holeT + tt) + rand(-0.25, 0.25) * (d.sigma / 1.2), y: HOLE_Y, z: (s === 1 ? -1 : 1) * (HL - RB * 1.2) };
               const sol = solveThrow(ai, target, v, 0);
               launch(ai, ai.hold, sol.yaw, sol.pitch, v, 0);
             } else {
               const tg = foes[(Math.random() * foes.length) | 0], t = Math.abs(tg.z - ai.z) / 18;
               const target = { x: tg.x + tg.vx * t * 0.9 + app.mem.bias * 0.5 * d.adapt + rand(-1, 1) * d.sigma, z: tg.z };
-              const v = rand(d.vr[0], d.vr[1]) * THROW_MUL, spin = rand(-d.curve, d.curve);
+              const v = rand(d.vr[0], d.vr[1]) * THROW_MUL * (ai.hold.glow ? PERFECT_BOOST : 1), spin = rand(-d.curve, d.curve);
               const sol = solveThrow(ai, target, v, spin);
               launch(ai, ai.hold, sol.yaw, sol.pitch, v, spin);
               a.watch = { t: 0.9, c: tg, x0: tg.x, vx0: tg.vx };
@@ -1956,6 +1987,7 @@ function showEnd(title, sub, canRematch) {
   $('eRematch').textContent = 'Rematch'; $('eNext').hidden = true; showScreen('end');
 }
 function leaveToMenu() {
+  mxReset(); testBar(false);
   if (app.camp) { const tst = app.camp.test; app.size = app.camp.save.size; app.diff = app.camp.save.diff; app.camp = null; WIN_ROUNDS = 2; vnKill(); setSizeChips(); setDiffChips(); if (tst && typeof edBack === 'function') setTimeout(edBack, 0); }
   leaveNet(); app.mode = 'menu'; app.paused = false; state.phase = 'menu'; soloRoster();
   bodyClass('ingame', false); resetRound(); showScreen('menu'); setBanner('');
@@ -2007,7 +2039,7 @@ function uiTick() {
   if (app.mode === 'hoops') { hoopsUI(); return; }
   const pl = state.pl, team = app.roster.size > 1;
   setLabs(team ? 'YOUR TEAM' : (myName() || 'YOU').toUpperCase(), app.camp && app.camp.foe ? app.camp.foe.toUpperCase() : (team ? 'RIVALS' : 'RIVAL'));
-  const h = n => '❤'.repeat(Math.max(0, n)) + '🖤'.repeat(Math.max(0, 3 - n));
+  const h = n => '❤'.repeat(Math.max(0, n)) + '🖤'.repeat(Math.max(0, MX.hp - n));
   const lst = mine => state.chars.filter(c => (c.team === pl.team) === mine).sort((a, b) => (b === pl) - (a === pl)).map(c => team ? (c.ko ? '✖' : '❤' + c.hp) : h(c.hp)).join('  ');
   const hp = lst(true), ha = lst(false);
   if ($('hpP').textContent !== hp) $('hpP').textContent = hp;
@@ -2016,9 +2048,9 @@ function uiTick() {
   $('round').textContent = 'ROUND ' + Math.min(3, state.score[0] + state.score[1] + 1) + ' · FIRST TO ' + WIN_ROUNDS;
   let b = '';
   if (state.phase === 'countdown') b = state.cd > 1.5 ? (state.score[0] === WIN_ROUNDS - 1 && state.score[1] === WIN_ROUNDS - 1 ? 'FINAL ROUND' : 'ROUND ' + (state.score[0] + state.score[1] + 1)) : String(clamp(Math.ceil(state.cd / 0.5), 1, 3));
-  else if (state.phase === 'play' && state.goT > 0) b = 'FIGHT!';
+  else if (state.phase === 'play' && state.goT > 0) b = MX.fight || 'FIGHT!';
   else if (state.phase === 'roundover') b = state.winner === 0 ? 'ROUND WON' : 'ROUND LOST';
-  else if (state.phase === 'play' && pl.ko && team && state.chars.some(c => c.team === pl.team && !c.ko)) b = 'YOU ARE OUT<small>Throw a ball into your glowing hole to bring a teammate back</small>';
+  else if (state.phase === 'play' && pl.ko && team && MX.hoop && state.chars.some(c => c.team === pl.team && !c.ko)) b = 'YOU ARE OUT<small>Throw a ball into your glowing hole to bring a teammate back</small>';
   setBanner(b);
   if (state.phase === 'roundover' && state.winner === 0 && state.matchWin < 0 && confKey !== state.score.join('-')) { confKey = state.score.join('-'); confettiBurst(70); }
   if (state.phase === 'matchover') {
@@ -2177,7 +2209,7 @@ window.addEventListener('keyup', e => {
 });
 
 // ---------- menu wiring ----------
-function startSolo() { soloRoster(); app.mode = 'solo'; app.paused = false; bodyClass('ingame', true); startMatch(); setHint(teamHint(HINT_SOLO)); }
+function startSolo() { mxReset(); soloRoster(); app.mode = 'solo'; app.paused = false; bodyClass('ingame', true); startMatch(); setHint(teamHint(HINT_SOLO)); }
 function openPause() {
   if (app.mode === 'menu') return;
   app.paused = app.mode === 'solo' || app.mode === 'hoops';
@@ -2356,6 +2388,7 @@ function doCue(c) {
   else if (c.kind === 'fx') screenFx(c.name, c.dur);
   else if (c.kind === 'sfx') { const f = SFX[c.name]; if (f) f(); }
   else if (c.kind === 'bg') setBgEl($('vnStage'), c.src);
+  else if (c.kind === 'expr' && o) { const s = refSrc(c.src); if (s) o.img.src = s; }
   else if (c.kind === 'flip' && o) o.img.style.transform = o.img.style.transform ? '' : 'scaleX(-1)';
 }
 function vnShowChoice(on) { $('vnChoices').hidden = !on; }
@@ -2375,7 +2408,7 @@ function choiceStart(n) {
   const c = app.camp; vnStop(); vn.on = true; vn.ask = true;
   $('vnQuote').hidden = true; $('vnTitle').hidden = true; showScreen('vn');
   const box = $('vnChoices'); box.innerHTML = '';
-  (n.options || []).forEach(o => { const b = document.createElement('button'); b.className = 'big alt'; b.textContent = o.t || '...'; b.onclick = ev => { ev.stopPropagation(); vnShowChoice(false); vnStop(); nodeGo(o.next); }; box.appendChild(b); });
+  (function (all) { const v = all.filter(o => condOk(o.req)); return v.length ? v : all; })(n.options || []).forEach(o => { const b = document.createElement('button'); b.className = 'big alt'; b.textContent = o.t || '...'; b.onclick = ev => { ev.stopPropagation(); vnShowChoice(false); vnStop(); nodeGo(o.next); }; box.appendChild(b); });
   vnShowChoice(true);
   const has = !!(n.prompt && n.prompt.trim()); $('vnBox').hidden = !has;
   if (has) { $('vnName').style.display = 'none'; $('vnText').classList.add('narr'); $('vnText').textContent = n.prompt; $('vnNext').hidden = true; }
@@ -2431,10 +2464,26 @@ function skinKey(ref) {
   }
   return null;
 }
+function varsInit(camp, restore) {
+  const v = {}; Object.keys(camp.vars || {}).forEach(k => { v[k] = +((camp.vars[k] || {}).init) || 0; });
+  if (restore) { try { const s = JSON.parse(localStorage.getItem('dd_vars_' + (camp.pid || 'x')) || 'null'); if (s) for (const k in v) if (typeof s[k] === 'number') v[k] = s[k]; } catch (e) {} }
+  return v;
+}
+function condOk(cond) {
+  if (!cond || !cond.v) return true;
+  const vs = (app.camp && app.camp.vars) || {}, a = +vs[cond.v] || 0, b = +cond.val || 0;
+  switch (cond.op) { case '==': return a === b; case '!=': return a !== b; case '>': return a > b; case '<': return a < b; case '<=': return a <= b; default: return a >= b; }
+}
+function applySets(list) {
+  const c = app.camp; if (!c) return; c.vars = c.vars || {};
+  (list || []).forEach(s => { if (!s || !s.v) return; const cur = +c.vars[s.v] || 0, val = +s.val || 0; c.vars[s.v] = s.op === '+' ? cur + val : s.op === '-' ? cur - val : val; });
+}
+function testBar(on) { const b = $('edBackTest'); if (b) b.hidden = !on; }
 function progKey() { return 'dd_prog_' + (app.camp ? app.camp.pid : ''); }
 function storyBegin(camp, startId, opts) {
   ensureAudio(); CUR = camp;
   app.camp = { pid: camp.pid || 'x', cur: null, foe: '', foeSkin: null, allySkin: null, hinted: false, test: !!(opts && opts.test), id: null, save: { size: app.size, diff: app.diff } };
+  app.camp.vars = varsInit(camp, !!startId && !(opts && opts.test) && startId !== camp.start); testBar(!!(opts && opts.test));
   nodeGo(startId || camp.start);
 }
 function nodeGo(id) {
@@ -2442,10 +2491,15 @@ function nodeGo(id) {
   const n = CUR.nodes[id];
   if (!n) { storyFinish(); return; }
   c.id = id;
+  if (n.type !== 'set' && n.type !== 'if' && n.type !== 'start') c.hops = 0;
   const nxt = () => nodeGo(n.next);
   if (n.type === 'start') nodeGo(n.next);
+  else if (n.type === 'set' || n.type === 'if') {
+    c.hops = (c.hops || 0) + 1; if (c.hops > 200) { storyFinish(); return; }
+    if (n.type === 'set') { applySets(n.sets); nodeGo(n.next); } else nodeGo(condOk(n.cond) ? n.yes : n.no);
+  }
   else if (n.type === 'scene' || n.type === 'card') {
-    if (!c.test) { try { localStorage.setItem(progKey(), id); } catch (e) {} }
+    if (!c.test) { try { localStorage.setItem(progKey(), id); localStorage.setItem('dd_vars_' + c.pid, JSON.stringify(c.vars || {})); } catch (e) {} }
     if (app.mode === 'solo') app.paused = true;
     if (n.type === 'scene') sceneStart(n, nxt); else cardStart(n, nxt);
   }
@@ -2458,7 +2512,7 @@ function nodeGo(id) {
   else storyFinish();
 }
 function storyFinish() {
-  if (app.camp && !app.camp.test) { try { localStorage.removeItem(progKey()); } catch (e) {} }
+  if (app.camp && !app.camp.test) { try { localStorage.removeItem(progKey()); localStorage.removeItem('dd_vars_' + app.camp.pid); } catch (e) {} }
   leaveToMenu();
 }
 function storyMatch(m) {
@@ -2466,7 +2520,7 @@ function storyMatch(m) {
   const order = ['easy', 'normal', 'hard'];
   app.diff = order[clamp(order.indexOf(m.diff || 'normal') + (order.indexOf(c.save.diff) - 1), 0, 2)];
   app.size = clamp(+m.size || 1, 1, 3); c.foe = m.foe || ''; c.foeSkin = skinKey(m.foeSkin); c.allySkin = skinKey(m.allySkin);
-  WIN_ROUNDS = clamp(+m.rounds || 2, 1, 3);
+  WIN_ROUNDS = clamp(+m.rounds || 2, 1, 3); mxSet(m);
   soloRoster(); app.mode = 'solo'; app.paused = false; bodyClass('ingame', true);
   startMatch();
   if (!c.hinted) { c.hinted = true; setHint(teamHint(HINT_SOLO)); }
@@ -2626,34 +2680,90 @@ $('cBack').onclick = () => showScreen('menu');
 $('cEdit').onclick = () => { if (isCreator()) edOpen(); };
 
 // ---------- campaign editor: state, storage, node canvas (creator only) ----------
-const ED = { camp: null, id: null, sel: null, view: { x: 30, y: 20, k: 1 }, saveT: null, els: {} };
-const NT = { start: ['▶', 'Start'], scene: ['🎬', 'Scene'], choice: ['❓', 'Choice'], match: ['🏐', 'Dodgeball match'], card: ['🃏', 'Title card'], end: ['🏁', 'End'] };
+const ED = { camp: null, id: null, sel: null, view: { x: 30, y: 20, k: 1 }, saveT: null, els: {}, undo: [], redo: [], base: '', dirty: false, quietT: null, lint: null, lintT: null, histT: 0 };
+const NT = { set: ['🧮', 'Set variable'], if: ['🔀', 'If / else'], start: ['▶', 'Start'], scene: ['🎬', 'Scene'], choice: ['❓', 'Choice'], match: ['🏐', 'Dodgeball match'], card: ['🃏', 'Title card'], end: ['🏁', 'End'] };
 const eid = p => p + Math.random().toString(36).slice(2, 7);
 const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function edStatus(t) { const e = $('edStat'); if (e) e.textContent = t; }
+// undo/redo: every edit burst (typing, a drag, a click) is one step. Snapshots hold nodes, variables, name and start; art is not rolled back.
+const edSnap = () => JSON.stringify({ name: ED.camp.name, start: ED.camp.start, vars: ED.camp.vars || {}, nodes: ED.camp.nodes });
+function edUndoBtns() { const u = $('edUndo'), r = $('edRedo'); if (u) u.disabled = !ED.undo.length; if (r) r.disabled = !ED.redo.length; }
+function edCommit() { clearTimeout(ED.quietT); if (ED.dirty && ED.camp) { ED.dirty = false; ED.base = edSnap(); } edUndoBtns(); }
 function edChange() {
-  clearTimeout(ED.saveT); edStatus('Editing...');
-  ED.saveT = setTimeout(edSave, 700);
+  if (!ED.camp) return;
+  if (!ED.dirty) { ED.dirty = true; if (ED.base) { ED.undo.push(ED.base); if (ED.undo.length > 100) ED.undo.shift(); } ED.redo = []; edUndoBtns(); }
+  clearTimeout(ED.quietT); ED.quietT = setTimeout(edCommit, 600);
+  clearTimeout(ED.saveT); edStatus('Editing...'); ED.saveT = setTimeout(edSave, 700);
+  clearTimeout(ED.lintT); ED.lintT = setTimeout(edMarkLint, 250);
 }
+function edApply(s) {
+  const o = JSON.parse(s), c = ED.camp;
+  c.name = o.name; c.start = o.start; c.vars = o.vars || {}; c.nodes = o.nodes; $('edName').value = c.name || '';
+  if (ED.sel && !c.nodes[ED.sel]) ED.sel = null;
+  edRender();
+  if (ED.sel) { for (const k in ED.els) ED.els[k].classList.toggle('sel', k === ED.sel); if (!$('edInsp').hidden) edInspector(c.nodes[ED.sel]); }
+  else { $('edInsp').hidden = true; $('ed').classList.remove('insp'); }
+  clearTimeout(ED.saveT); edStatus('Editing...'); ED.saveT = setTimeout(edSave, 400);
+}
+function edUndo() { if (!ED.camp) return; edCommit(); if (!ED.undo.length) return; ED.redo.push(edSnap()); const s = ED.undo.pop(); ED.base = s; ED.dirty = false; edApply(s); edUndoBtns(); }
+function edRedo() { if (!ED.camp) return; edCommit(); if (!ED.redo.length) return; ED.undo.push(edSnap()); const s = ED.redo.pop(); ED.base = s; ED.dirty = false; edApply(s); edUndoBtns(); }
 async function edSave() {
   if (!ED.camp) return;
   const all = (await kv.get('drafts')) || {};
   all[ED.id] = { id: ED.id, name: ED.camp.name || 'Untitled', updated: Date.now(), camp: ED.camp };
   const ok = await kv.set('drafts', all);
-  edStatus(ok ? 'Saved ✓' : 'NOT saved (too big?)');
+  edStatus(ok ? 'Saved ✓ ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'NOT saved (too big?)');
+  if (ok && Date.now() - ED.histT > 300000) { ED.histT = Date.now(); edHistAdd('Auto'); }
 }
+// version history: snapshots of the story (no art) kept per draft; starred ones are yours and are never thinned out
+async function edHistGet() { return (await kv.get('hist_' + ED.id)) || []; }
+async function edHistAdd(label, force) {
+  if (!ED.camp) return;
+  const h = await edHistGet(), snap = edSnap();
+  if (!force && h[0] && h[0].s === snap) return;
+  h.unshift({ t: Date.now(), label: label || 'Auto', n: Object.keys(ED.camp.nodes).length, s: snap });
+  while (h.length > 25) { let k = h.length - 1; while (k >= 0 && h[k].label.charAt(0) === '★') k--; if (k < 0) k = h.length - 1; h.splice(k, 1); }
+  await kv.set('hist_' + ED.id, h);
+}
+async function edHistory() {
+  if (!ED.camp) { edStatus('Open a campaign first'); return; }
+  const h = await edHistGet();
+  edModalOpen(c => {
+    c.appendChild(el('h3', { text: 'Version history' }));
+    c.appendChild(el('div', { text: 'Versions are saved automatically every few minutes, when you open a draft, and before each test. Restoring one can be undone with the undo button. Art stays as it is now.', style: 'opacity:.7;font-size:12px;margin-bottom:6px' }));
+    const nm = el('input', { type: 'text', placeholder: 'Name this version (optional)' });
+    c.appendChild(el('div', { cls: 'r2' }, [nm, btn('★ Save version', async () => { await edHistAdd('★ ' + (nm.value.trim() || 'Saved version'), true); edHistory(); }, 'go')]));
+    if (!h.length) c.appendChild(el('div', { text: 'No versions yet.', style: 'margin:8px 0' }));
+    h.forEach(v => {
+      c.appendChild(el('div', { cls: 'card2 r2' }, [
+        el('div', { text: new Date(v.t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' · ' + v.label + ' · ' + v.n + ' nodes', style: 'flex:1;font-weight:700;font-size:12px' }),
+        btn('Restore', async () => { edCommit(); await edHistAdd('Before restore'); ED.undo.push(edSnap()); ED.redo = []; ED.base = v.s; ED.dirty = false; edApply(v.s); edUndoBtns(); edModalClose(); edStatus('Restored'); }, 'go')]));
+    });
+    c.appendChild(el('div', { cls: 'r2' }, [btn('Back', edFiles)]));
+  });
+}
+window.addEventListener('keydown', e => {
+  if (!ED.camp || $('ed').hidden || !$('edModal').hidden) return;
+  const t = e.target && e.target.tagName; if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) edRedo(); else edUndo(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); edRedo(); }
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && ED.camp && ED.dirty) edSave(); });
+window.addEventListener('pagehide', () => { if (ED.camp) edSave(); });
 function edOpen() {
   if (!isCreator()) return;
   if (ED.camp) { showScreen('ed'); edRender(); } else edFiles();
 }
 function edBack() { if (ED.camp) { showScreen('ed'); edRender(); if (ED.sel && ED.camp.nodes[ED.sel]) edSelect(ED.sel); } else edFiles(); }
 function edLoad(id, camp) {
-  ED.id = id; ED.camp = camp; ED.sel = null; camp.assets = camp.assets || {}; camp.nodes = camp.nodes || {};
+  ED.id = id; ED.camp = camp; ED.sel = null; camp.assets = camp.assets || {}; camp.nodes = camp.nodes || {}; camp.vars = camp.vars || {};
+  ED.undo = []; ED.redo = []; ED.dirty = false; clearTimeout(ED.quietT); ED.base = edSnap(); ED.histT = Date.now(); edUndoBtns(); edHistAdd('Opened');
   $('edName').value = camp.name || ''; ED.view = { x: 30, y: 20, k: 1 };
   showScreen('ed'); edRender(); edFit(); edSelect(null); edStatus('');
 }
 function edNodeEl(n) {
-  const d = document.createElement('div'); d.className = 'nd t-' + n.type + (ED.sel === n.id ? ' sel' : ''); d.dataset.id = n.id;
+  const d = document.createElement('div'); d.className = 'nd t-' + n.type + (ED.sel === n.id ? ' sel' : '') + (ED.lint && ED.lint.dead[n.id] ? ' bad' : '') + (ED.lint && ED.lint.unreach[n.id] ? ' unr' : ''); d.dataset.id = n.id;
   d.style.left = n.x + 'px'; d.style.top = n.y + 'px';
   const t = NT[n.type] || ['?', n.type];
   let body = '';
@@ -2661,18 +2771,24 @@ function edNodeEl(n) {
   else if (n.type === 'card') body = '<div class="row">' + esc(n.kind === 'quote' ? 'Quote' : 'Title') + '</div><small>' + esc(n.text) + '</small>';
   else if (n.type === 'end') body = '<small>' + esc(n.text || 'Back to menu') + '</small>';
   else if (n.type === 'start') body = '<small>Story begins here</small>';
+  else if (n.type === 'set') body = '<small>' + esc(setText(n.sets)) + '</small>';
+  else if (n.type === 'if') body = '<small>' + esc(condText(n.cond)) + '</small><div class="row pr">YES<span class="port" data-src="' + n.id + '" data-f="yes"></span></div><div class="row pr">NO<span class="port lose" data-src="' + n.id + '" data-f="no"></span></div>';
   else if (n.type === 'choice') { body = n.prompt ? '<small>' + esc(n.prompt) + '</small>' : ''; (n.options || []).forEach((o, i) => { body += '<div class="row pr">' + esc(o.t) + '<span class="port" data-src="' + n.id + '" data-f="o' + i + '"></span></div>'; }); }
-  else if (n.type === 'match') body = '<small>' + esc(n.foe || 'Opponent') + ' · ' + (n.size || 1) + 'v' + (n.size || 1) + ' · ' + esc(n.diff || 'normal') + '</small><div class="row pr">WIN<span class="port" data-src="' + n.id + '" data-f="win"></span></div><div class="row pr">LOSE (retry if empty)<span class="port lose" data-src="' + n.id + '" data-f="lose"></span></div>';
-  d.innerHTML = '<div class="nh">' + t[0] + ' ' + esc(n.label || t[1]) + '</div><div class="nb">' + body + '</div>' + (n.type === 'start' ? '' : '<span class="port in"></span>') + (['start', 'scene', 'card'].indexOf(n.type) >= 0 ? '<span class="port" data-src="' + n.id + '" data-f="next" style="top:50%"></span>' : '');
+  else if (n.type === 'match') body = '<small>' + esc(n.foe || 'Opponent') + ' · ' + (n.size || 1) + 'v' + (n.size || 1) + ' · ' + esc(n.diff || 'normal') + (mxCustom(n) ? ' · ★ rules' : '') + '</small><div class="row pr">WIN<span class="port" data-src="' + n.id + '" data-f="win"></span></div><div class="row pr">LOSE (retry if empty)<span class="port lose" data-src="' + n.id + '" data-f="lose"></span></div>';
+  d.innerHTML = '<div class="nh">' + t[0] + ' ' + esc(n.label || t[1]) + '<span class="nplay" title="Play from here">&#9654;</span></div><div class="nb">' + body + '</div>' + (n.type === 'start' ? '' : '<span class="port in"></span>') + (['start', 'scene', 'card', 'set'].indexOf(n.type) >= 0 ? '<span class="port" data-src="' + n.id + '" data-f="next" style="top:50%"></span>' : '');
   return d;
 }
-function edGetT(n, f) { if (f === 'next') return n.next; if (f === 'win') return n.win; if (f === 'lose') return n.lose; return (n.options[+f.slice(1)] || {}).next; }
-function edSetT(n, f, t) { if (f === 'next') n.next = t; else if (f === 'win') n.win = t; else if (f === 'lose') n.lose = t; else if (n.options[+f.slice(1)]) n.options[+f.slice(1)].next = t; }
+const PORT_F = { next: 1, win: 1, lose: 1, yes: 1, no: 1 };
+function edGetT(n, f) { if (PORT_F[f]) return n[f]; return ((n.options || [])[+f.slice(1)] || {}).next; }
+function edSetT(n, f, t) { if (PORT_F[f]) n[f] = t; else if ((n.options || [])[+f.slice(1)]) n.options[+f.slice(1)].next = t; }
+const mxCustom = n => !!((n.hp && n.hp !== 3) || (n.speed && n.speed !== 1) || n.balls || (n.rate && n.rate !== 1) || n.hoop === false || n.hold || n.fight);
+const condText = c => (c && c.v) ? c.v + ' ' + (c.op || '>=') + ' ' + (c.val == null ? 0 : c.val) : '(pick a variable)';
+const setText = l => (l && l.length) ? l.map(s => s.v ? s.v + ' ' + (s.op === '+' ? '+=' : s.op === '-' ? '-=' : '=') + ' ' + (s.val == null ? 0 : s.val) : '?').join(', ') : '(nothing yet)';
 function edRender() {
   const box = $('edNodes'); box.innerHTML = ''; ED.els = {};
   if (!ED.camp) return;
   for (const id in ED.camp.nodes) { const el = edNodeEl(ED.camp.nodes[id]); box.appendChild(el); ED.els[id] = el; }
-  edView(); edWires();
+  edView(); edWires(); edMarkLint();
 }
 function edView() { const v = ED.view; $('edWorld').style.transform = 'translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.k + ')'; }
 function edPos(el) { const r = el.getBoundingClientRect(), w = $('edWorld').getBoundingClientRect(), k = ED.view.k; return { x: (r.left + r.width / 2 - w.left) / k, y: (r.top + r.height / 2 - w.top) / k }; }
@@ -2684,7 +2800,7 @@ function edWires(tmp) {
     el.querySelectorAll('.port:not(.in)').forEach(p => {
       const t = edGetT(n, p.dataset.f), te = t && ED.els[t]; if (!te) return;
       const tin = te.querySelector('.port.in'); if (!tin) return;
-      h += '<path class="wire' + (p.dataset.f === 'lose' ? ' lose' : '') + '" d="' + edPath(edPos(p), edPos(tin)) + '"/>';
+      h += '<path class="wire' + ((p.dataset.f === 'lose' || p.dataset.f === 'no') ? ' lose' : '') + '" d="' + edPath(edPos(p), edPos(tin)) + '"/>';
     });
   }
   if (tmp) h += '<path class="wire tmp" d="' + edPath(tmp.a, tmp.b) + '"/>';
@@ -2723,6 +2839,8 @@ function edAddNode(type) {
     choice: { prompt: '', options: [{ t: 'Option A', next: '' }, { t: 'Option B', next: '' }] },
     match: { foe: 'Rival', foeSkin: '', allySkin: '', size: 1, diff: 'normal', rounds: 2, win: '', lose: '' },
     card: { kind: 'title', text: 'Title', sub: '', bg: 'black', next: '' },
+    set: { sets: [], next: '' },
+    if: { cond: { v: '', op: '>=', val: 1 }, yes: '', no: '' },
     end: { text: '', sub: '' }
   };
   const n = Object.assign(base, JSON.parse(JSON.stringify(defs[type] || {})));
@@ -2732,7 +2850,7 @@ function edAddNode(type) {
 function edDelNode(id) {
   const c = ED.camp; if (!c.nodes[id] || c.nodes[id].type === 'start') return;
   delete c.nodes[id];
-  for (const k in c.nodes) { const n = c.nodes[k]; if (n.next === id) n.next = ''; if (n.win === id) n.win = ''; if (n.lose === id) n.lose = ''; (n.options || []).forEach(o => { if (o.next === id) o.next = ''; }); }
+  for (const k in c.nodes) { const n = c.nodes[k]; if (n.next === id) n.next = ''; if (n.win === id) n.win = ''; if (n.lose === id) n.lose = ''; if (n.yes === id) n.yes = ''; if (n.no === id) n.no = ''; (n.options || []).forEach(o => { if (o.next === id) o.next = ''; }); }
   edSelect(null); edRender(); edChange();
 }
 // pointer handling: pan, pinch-zoom, drag nodes, drag wires from ports
@@ -2740,6 +2858,8 @@ function edDelNode(id) {
   const view = $('edView'), ptrs = new Map(); let mode = null, st = null;
   const dist = () => { const a = [...ptrs.values()]; return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1; };
   view.addEventListener('pointerdown', e => {
+    const pb = e.target.closest && e.target.closest('.nplay');
+    if (pb) { e.preventDefault(); const nd0 = pb.closest('.nd'); if (nd0) edTest(nd0.dataset.id); return; }
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (ptrs.size === 2) { mode = 'pinch'; st = { d: dist() }; return; }
     const port = e.target.closest('.port:not(.in)'), nd = e.target.closest('.nd');
@@ -2830,14 +2950,14 @@ function resizeTo(file, kind, done) {
     g.drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url);
     done(kind === 'bg' ? c.toDataURL('image/jpeg', 0.82) : c.toDataURL('image/png'));
   };
-  img.onerror = () => { URL.revokeObjectURL(url); edStatus('Could not read that image'); };
+  img.onerror = () => { URL.revokeObjectURL(url); edStatus('Could not read that image'); done(null); };
   img.src = url;
 }
 function edUpload(kind, done) {
   const f = document.createElement('input'); f.type = 'file'; f.accept = kind === 'music' ? 'audio/*' : 'image/*';
   f.onchange = () => {
     const file = f.files && f.files[0]; if (!file) return;
-    const nm = file.name.replace(/\.[^.]+$/, '').slice(0, 30), add = d => { const id = eid('a'); ED.camp.assets[id] = { name: nm, kind, d }; edChange(); done('a:' + id); };
+    const nm = file.name.replace(/\.[^.]+$/, '').slice(0, 30), add = d => { if (!d) return; const id = eid('a'); ED.camp.assets[id] = { name: nm, kind, d }; edChange(); done('a:' + id); };
     if (kind === 'music') { if (file.size > 6e6) { edStatus('Music over 6 MB, use a shorter file'); return; } const r = new FileReader(); r.onload = () => add(r.result); r.readAsDataURL(file); }
     else resizeTo(file, kind, add);
   };
@@ -2854,7 +2974,7 @@ function pick(title, kind, extra, onPick, allowNone) {
     };
     if (allowNone) cell('', 'None', '#555');
     (extra || []).forEach(x => cell(x[0], x[1], x[2]));
-    for (const id in ED.camp.assets) { const a = ED.camp.assets[id]; if (a.kind === kind) cell('a:' + id, a.name, kind === 'music' ? '#4a4270' : a.d); }
+    for (const id in ED.camp.assets) { const a = ED.camp.assets[id]; if (a.kind === kind) cell('a:' + id, a.group ? a.group + ' · ' + (a.tag || a.name) : a.name, kind === 'music' ? '#4a4270' : a.d); }
     c.appendChild(grid);
     if (kind === 'bg') {
       const col = el('input', { type: 'color', value: '#335577' });
@@ -2869,6 +2989,83 @@ const pickChar = cb => pick('Choose character art', 'char', castItems(), cb);
 const pickSkin = cb => pick('Opponent art', 'char', castItems(), cb, true);
 const pickMusic = cb => pick('Choose music', 'music', [], cb);
 
+// ---------- campaign editor: variables, branching helpers, story check ----------
+function chk(val, fn) { const c = el('input', { type: 'checkbox' }); c.checked = !!val; c.onchange = () => fn(c.checked); return c; }
+function varSel(cur, fn) { const ks = Object.keys(ED.camp.vars || {}); return sel([['', '— pick variable —']].concat(ks.map(k => [k, k])), cur || '', fn); }
+function condEditor(cond, onChange) {
+  return el('div', { cls: 'r2' }, [varSel(cond.v, v => { cond.v = v; onChange(); }), sel([['>=', '≥'], ['>', '>'], ['==', '='], ['!=', '≠'], ['<=', '≤'], ['<', '<']], cond.op || '>=', v => { cond.op = v; onChange(); }), el('div', { cls: 'tiny' }, [inp(cond.val == null ? 1 : cond.val, v => { cond.val = v; onChange(); }, 'number')])]);
+}
+function edVarRename(old, nu) {
+  nu = String(nu).replace(/[^\w]+/g, '_').slice(0, 20); const vs = ED.camp.vars;
+  if (!nu || nu === old || vs[nu]) return false;
+  const nv = {}; Object.keys(vs).forEach(k => { nv[k === old ? nu : k] = vs[k]; }); ED.camp.vars = nv;
+  for (const id in ED.camp.nodes) { const n = ED.camp.nodes[id]; if (n.cond && n.cond.v === old) n.cond.v = nu; (n.sets || []).forEach(s => { if (s.v === old) s.v = nu; }); (n.options || []).forEach(o => { if (o.req && o.req.v === old) o.req.v = nu; }); }
+  return true;
+}
+function edVars() {
+  if (!ED.camp) { edStatus('Open a campaign first'); return; }
+  edModalOpen(c => {
+    c.appendChild(el('h3', { text: 'Story variables' }));
+    c.appendChild(el('div', { text: 'Numbers the story remembers (trust, items, a won match as 1). Change them with + Set nodes; branch on them with + If nodes or a choice option’s “only show if”. Tests and new games start from the values below.', style: 'opacity:.75;font-size:12px;margin-bottom:6px' }));
+    const keys = Object.keys(ED.camp.vars);
+    if (!keys.length) c.appendChild(el('div', { text: 'No variables yet.', style: 'margin:8px 0' }));
+    keys.forEach(k => {
+      const nm = el('input', { type: 'text' }); nm.value = k;
+      nm.onchange = () => { if (edVarRename(k, nm.value)) { edChange(); edRender(); edVars(); } else nm.value = k; };
+      const iv = el('input', { type: 'number' }); iv.value = +ED.camp.vars[k].init || 0; iv.onchange = () => { ED.camp.vars[k].init = +iv.value || 0; edChange(); };
+      let armed = false;
+      const del = btn('✕', () => { if (!armed) { armed = true; del.textContent = 'Sure?'; return; } delete ED.camp.vars[k]; edChange(); edMarkLint(); edVars(); }, 'red');
+      c.appendChild(el('div', { cls: 'card2 r2' }, [nm, el('span', { text: 'starts at', style: 'flex:none;opacity:.7' }), el('div', { cls: 'tiny' }, [iv]), del]));
+    });
+    c.appendChild(el('div', { cls: 'r2' }, [btn('+ Add variable', () => { let i = keys.length + 1, nm = 'var' + i; while (ED.camp.vars[nm]) nm = 'var' + (++i); ED.camp.vars[nm] = { init: 0 }; edChange(); edVars(); }, 'go'), btn('Close', edModalClose)]));
+  });
+}
+// story check: unreachable nodes, steps that lead nowhere, unknown variables
+function edLint() {
+  const c = ED.camp, ns = c.nodes, vs = c.vars || {}, seen = {}, dead = {}, unreach = {}, msgs = [];
+  const outs = n => {
+    if (n.type === 'start' || n.type === 'scene' || n.type === 'card' || n.type === 'set') return [['next', n.next]];
+    if (n.type === 'match') return [['win', n.win], ['lose', n.lose]];
+    if (n.type === 'if') return [['yes', n.yes], ['no', n.no]];
+    if (n.type === 'choice') return (n.options || []).map((o, i) => ['o' + i, o.next]);
+    return [];
+  };
+  const portName = (n, f) => f === 'next' ? 'next step' : f === 'win' ? 'WIN' : f === 'yes' ? 'YES' : f === 'no' ? 'NO' : 'option “' + String((((n.options || [])[+f.slice(1)]) || {}).t || '').slice(0, 18) + '”';
+  const q = [c.start]; seen[c.start] = true;
+  while (q.length) { const n = ns[q.pop()]; if (!n) continue; outs(n).forEach(o => { if (o[1] && ns[o[1]] && !seen[o[1]]) { seen[o[1]] = true; q.push(o[1]); } }); }
+  for (const id in ns) {
+    const n = ns[id];
+    if (!seen[id]) { unreach[id] = true; msgs.push({ id, text: nodeName(id) + ' can never be reached' }); }
+    outs(n).forEach(o => { if (!(n.type === 'match' && o[0] === 'lose') && (!o[1] || !ns[o[1]])) { dead[id] = true; msgs.push({ id, text: nodeName(id) + ': ' + portName(n, o[0]) + ' goes nowhere' }); } });
+    if (n.type === 'choice' && !(n.options || []).length) { dead[id] = true; msgs.push({ id, text: nodeName(id) + ' has no options' }); }
+    const bad = v => v && !vs[v];
+    if ((n.type === 'if' && (!n.cond || !n.cond.v || bad(n.cond.v))) || (n.type === 'set' && (n.sets || []).some(s => !s.v || bad(s.v))) || (n.type === 'choice' && (n.options || []).some(o => o.req && bad(o.req.v)))) { dead[id] = true; msgs.push({ id, text: nodeName(id) + ' uses a variable that is not set up' }); }
+  }
+  return { dead, unreach, msgs };
+}
+function edMarkLint() {
+  if (!ED.camp) return;
+  ED.lint = edLint();
+  for (const id in ED.els) { ED.els[id].classList.toggle('bad', !!ED.lint.dead[id]); ED.els[id].classList.toggle('unr', !!ED.lint.unreach[id]); }
+  const b = $('edChkBtn'); if (b) b.textContent = ED.lint.msgs.length ? '⚠ ' + ED.lint.msgs.length : '✔ Check';
+}
+function edGoto(id) {
+  const n = ED.camp.nodes[id]; if (!n) return; const r = $('edView').getBoundingClientRect();
+  ED.view.x = r.width / 2 - (n.x + 105) * ED.view.k; ED.view.y = r.height / 2 - (n.y + 40) * ED.view.k; edView(); edWires(); edSelect(id, true);
+}
+function edCheck() {
+  if (!ED.camp) { edStatus('Open a campaign first'); return; }
+  edMarkLint(); const L = ED.lint, ns = Object.values(ED.camp.nodes);
+  const cnt = t => ns.filter(n => n.type === t).length;
+  edModalOpen(c => {
+    c.appendChild(el('h3', { text: 'Story check' }));
+    c.appendChild(el('div', { text: cnt('scene') + ' scenes · ' + cnt('match') + ' matches · ' + cnt('choice') + ' choices · ' + cnt('end') + ' endings', style: 'opacity:.75;font-size:12px;margin-bottom:6px' }));
+    if (!L.msgs.length) c.appendChild(el('div', { text: 'No problems found. Every step connects, and everything can be reached from Start. ✓', style: 'margin:8px 0' }));
+    L.msgs.forEach(m => c.appendChild(el('div', { cls: 'lintrow' }, [el('span', { text: m.text }), btn('Show', () => { edModalClose(); edGoto(m.id); })])));
+    c.appendChild(el('div', { cls: 'r2' }, [btn('Close', edModalClose)]));
+  });
+}
+
 // ---------- campaign editor: inspector ----------
 function edInspector(n) {
   const body = $('edInspBody'), top = body.scrollTop;
@@ -2877,7 +3074,7 @@ function edInspector(n) {
   const add = x => { body.appendChild(x); return x; };
   const refresh = () => { const e = ED.els[n.id]; if (e) { const ne = edNodeEl(n); e.replaceWith(ne); ED.els[n.id] = ne; edWires(); } };
   if (n.type !== 'start') add(fld('Label (optional)', inp(n.label || '', v => { n.label = v; refresh(); tch(); })));
-  if (['start', 'scene', 'card'].indexOf(n.type) >= 0) add(fld('Then go to', targetSel(n.next, v => { n.next = v; tch(); })));
+  if (['start', 'scene', 'card', 'set'].indexOf(n.type) >= 0) add(fld('Then go to', targetSel(n.next, v => { n.next = v; tch(); })));
   if (n.type === 'scene') edScene(n, add, redo, refresh, tch);
   else if (n.type === 'card') {
     add(fld('Kind', sel([['title', 'Title card'], ['quote', 'Quote on black']], n.kind, v => { n.kind = v; refresh(); tch(); })));
@@ -2889,7 +3086,7 @@ function edInspector(n) {
     add(fld('Prompt (optional, shown while choosing)', ta(n.prompt, v => { n.prompt = v; refresh(); tch(); })));
     add(fld('Options', el('div')));
     (n.options || []).forEach((o, i) => {
-      const c = el('div', { cls: 'card2' }, [inp(o.t, v => { o.t = v; refresh(); tch(); }), fld('goes to', targetSel(o.next, v => { o.next = v; tch(); })), btn('Remove option', () => { n.options.splice(i, 1); refresh(); redo(); tch(); }, 'red')]);
+      const c = el('div', { cls: 'card2' }, [inp(o.t, v => { o.t = v; refresh(); tch(); }), fld('goes to', targetSel(o.next, v => { o.next = v; tch(); })), fld('only show if (optional)', condEditor(o.req || (o.req = { v: '', op: '>=', val: 1 }), tch)), btn('Remove option', () => { n.options.splice(i, 1); refresh(); redo(); tch(); }, 'red')]);
       add(c);
     });
     add(btn('+ Add option', () => { n.options.push({ t: 'New option', next: '' }); refresh(); redo(); tch(); }));
@@ -2900,8 +3097,27 @@ function edInspector(n) {
     add(fld('Team size', sel([[1, '1 v 1'], [2, '2 v 2'], [3, '3 v 3']], n.size || 1, v => { n.size = +v; refresh(); tch(); })));
     add(fld('Bot skill (shifts with the player setting)', sel([['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']], n.diff || 'normal', v => { n.diff = v; refresh(); tch(); })));
     add(fld('Rounds to win', sel([[1, '1'], [2, '2'], [3, '3']], n.rounds || 2, v => { n.rounds = +v; tch(); })));
+    add(el('div', { text: 'MATCH RULES', style: 'font-weight:800;margin:14px 0 0;letter-spacing:1px;font-size:11px;opacity:.7' }));
+    add(fld('Hits to knock a player out', sel([[1, '1 hit'], [2, '2 hits'], [3, '3 hits (normal)'], [4, '4 hits'], [5, '5 hits'], [6, '6 hits']], n.hp || 3, v => { n.hp = +v; refresh(); tch(); })));
+    add(fld('Ball speed', sel([[0.7, 'Slow (70%)'], [0.85, 'Relaxed (85%)'], [1, 'Normal'], [1.15, 'Fast (115%)'], [1.3, 'Very fast (130%)']], n.speed || 1, v => { n.speed = +v; refresh(); tch(); })));
+    add(fld('Number of balls', sel([[-1, 'Fewer'], [0, 'Normal'], [1, '+2 balls'], [2, '+4 balls']], n.balls || 0, v => { n.balls = +v; refresh(); tch(); })));
+    add(fld('How often bots throw', sel([[0.6, 'Rarely'], [0.8, 'Less'], [1, 'Normal'], [1.3, 'Often'], [1.7, 'Constantly']], n.rate || 1, v => { n.rate = +v; refresh(); tch(); })));
+    add(fld('Revive hoop (team matches)', sel([['1', 'On'], ['0', 'Off']], n.hoop === false ? '0' : '1', v => { n.hoop = v === '1'; refresh(); tch(); })));
+    add(el('div', { cls: 'r2', style: 'margin-top:10px' }, [chk(n.hold, v => { n.hold = v; refresh(); tch(); }), el('span', { text: 'You start each round holding a ball' })]));
+    add(fld('Banner text instead of “FIGHT!” (optional)', inp(n.fight || '', v => { n.fight = v; refresh(); tch(); })));
     add(fld('If you WIN go to', targetSel(n.win, v => { n.win = v; tch(); })));
     add(fld('If you LOSE go to (empty = retry only)', targetSel(n.lose, v => { n.lose = v; tch(); })));
+  } else if (n.type === 'set') {
+    n.sets = n.sets || [];
+    if (!Object.keys(ED.camp.vars || {}).length) add(el('div', { text: 'No variables yet. Tap “𝑥 Vars” in the top bar to create some (for example: trust, wonFirstMatch).', style: 'opacity:.75;font-size:12px;margin:6px 0' }));
+    add(fld('Changes (run in order)', el('div')));
+    n.sets.forEach((s, i) => add(el('div', { cls: 'card2' }, [varSel(s.v, v => { s.v = v; refresh(); tch(); }), el('div', { cls: 'r2' }, [sel([['=', 'set to'], ['+', 'add'], ['-', 'subtract']], s.op || '=', v => { s.op = v; refresh(); tch(); }), inp(s.val == null ? 1 : s.val, v => { s.val = v; refresh(); tch(); }, 'number'), btn('✕', () => { n.sets.splice(i, 1); refresh(); redo(); tch(); }, 'red')])])));
+    add(btn('+ Add change', () => { n.sets.push({ v: Object.keys(ED.camp.vars || {})[0] || '', op: '+', val: 1 }); refresh(); redo(); tch(); }));
+  } else if (n.type === 'if') {
+    n.cond = n.cond || { v: '', op: '>=', val: 1 };
+    add(fld('If', condEditor(n.cond, () => { refresh(); tch(); })));
+    add(fld('YES goes to', targetSel(n.yes, v => { n.yes = v; tch(); })));
+    add(fld('NO goes to', targetSel(n.no, v => { n.no = v; tch(); })));
   } else if (n.type === 'end') {
     add(fld('Closing title (optional)', inp(n.text, v => { n.text = v; refresh(); tch(); })));
     add(fld('Subtitle', inp(n.sub, v => { n.sub = v; tch(); })));
@@ -2932,19 +3148,20 @@ function edPreview(n, redo, tch) {
 }
 
 // ---------- campaign editor: scene form (stage, characters, lines, cues) ----------
-const CUE_KINDS = [['anim', 'Animate character'], ['move', 'Move character'], ['show', 'Show character'], ['hide', 'Hide character'], ['flip', 'Flip character'], ['fx', 'Screen effect'], ['sfx', 'Sound'], ['bg', 'Change background']];
+const CUE_KINDS = [['anim', 'Animate character'], ['move', 'Move character'], ['show', 'Show character'], ['hide', 'Hide character'], ['flip', 'Flip character'], ['fx', 'Screen effect'], ['sfx', 'Sound'], ['bg', 'Change background'], ['expr', 'Change expression (swap art)']];
 function cueRow(n, l, c, i, redo, tch) {
   const ch = (n.chars || []).map(x => [x.id, x.name || x.id]);
   const row = el('div', { cls: 'card2' });
   const kindSel = sel(CUE_KINDS, c.kind, v => { c.kind = v; if (!c.who && ch[0]) c.who = ch[0][0]; if (v === 'anim' && !c.name) c.name = 'wobble'; if (v === 'fx' && !c.name) c.name = 'shake'; if (v === 'sfx' && !c.name) c.name = 'ding'; redo(); tch(); });
   row.appendChild(el('div', { cls: 'r2' }, [el('span', { text: 'at' }), el('div', { cls: 'tiny' }, [inp(c.at || 0, v => { c.at = Math.max(0, v); tch(); }, 'number')]), el('span', { text: 's' }), kindSel, btn('✕', () => { l.cues.splice(i, 1); redo(); tch(); }, 'red')]));
-  const needsWho = ['anim', 'move', 'show', 'hide', 'flip'].indexOf(c.kind) >= 0;
+  const needsWho = ['anim', 'move', 'show', 'hide', 'flip', 'expr'].indexOf(c.kind) >= 0;
   if (needsWho) row.appendChild(sel(ch.length ? ch : [['', '(add a character first)']], c.who || '', v => { c.who = v; tch(); }));
   if (c.kind === 'anim') row.appendChild(el('div', { cls: 'r2' }, [sel(ANIM_NAMES.map(a => [a, a]), c.name || 'wobble', v => { c.name = v; tch(); }), el('div', { cls: 'tiny' }, [inp(c.dur || 0.8, v => { c.dur = v; tch(); }, 'number')])]));
   if (c.kind === 'move') row.appendChild(el('div', { cls: 'r2' }, [el('span', { text: 'x%' }), el('div', { cls: 'tiny' }, [inp(c.x == null ? 50 : c.x, v => { c.x = v; tch(); }, 'number')]), el('span', { text: 'y%' }), el('div', { cls: 'tiny' }, [inp(c.y || 0, v => { c.y = v; tch(); }, 'number')]), el('span', { text: 'sec' }), el('div', { cls: 'tiny' }, [inp(c.dur || 0.6, v => { c.dur = v; tch(); }, 'number')])]));
   if (c.kind === 'fx') row.appendChild(el('div', { cls: 'r2' }, [sel(FX_NAMES.map(a => [a, a]), c.name || 'shake', v => { c.name = v; tch(); }), el('div', { cls: 'tiny' }, [inp(c.dur || 0.6, v => { c.dur = v; tch(); }, 'number')])]));
   if (c.kind === 'sfx') row.appendChild(el('div', { cls: 'r2' }, [sel(SFX_NAMES.map(a => [a, a]), c.name || 'ding', v => { c.name = v; if (SFX[v]) { ensureAudio(); SFX[v](); } tch(); })]));
   if (c.kind === 'bg') row.appendChild(btn(bgName(c.src) + ' — change', () => pickBg(r => { c.src = r; redo(); tch(); })));
+  if (c.kind === 'expr') row.appendChild(btn(assetName(c.src) + ' — choose art', () => pickChar(r => { c.src = r; redo(); tch(); })));
   return row;
 }
 function edScene(n, add, redo, refresh, tch) {
@@ -2982,7 +3199,7 @@ function edScene(n, add, redo, refresh, tch) {
 
 // ---------- campaign editor: files, backup, test play ----------
 function newCampaign(name) {
-  return { name: name || 'New campaign', start: 'start', assets: {}, nodes: {
+  return { name: name || 'New campaign', start: 'start', assets: {}, vars: {}, nodes: {
     start: { id: 'start', type: 'start', x: 40, y: 80, next: 'n1' },
     n1: { id: 'n1', type: 'scene', x: 320, y: 60, bg: 'court', chars: [], lines: [{ w: null, t: 'Your story starts here.' }], music: { mode: 'keep' }, next: 'n2' },
     n2: { id: 'n2', type: 'end', x: 600, y: 80, text: '', sub: '' }
@@ -2998,12 +3215,13 @@ async function edFiles() {
     if (!list.length) c.appendChild(el('div', { text: 'No drafts yet.', style: 'margin:8px 0' }));
     list.forEach(d => {
       let armed = false;
-      const del = btn('Delete', async () => { if (!armed) { armed = true; del.textContent = 'Tap again'; return; } delete all[d.id]; await kv.set('drafts', all); if (ED.id === d.id) { ED.camp = null; ED.id = null; edRender(); } edFiles(); }, 'red');
+      const del = btn('Delete', async () => { if (!armed) { armed = true; del.textContent = 'Tap again'; return; } delete all[d.id]; await kv.set('drafts', all); await kv.set('hist_' + d.id, []); if (ED.id === d.id) { ED.camp = null; ED.id = null; edRender(); } edFiles(); }, 'red');
       c.appendChild(el('div', { cls: 'card2 r2' }, [el('div', { text: d.name + ' (' + Object.keys(d.camp.nodes).length + ' nodes)', style: 'flex:1;font-weight:700' }), btn('Open', () => { edModalClose(); edLoad(d.id, d.camp); }, 'go'), del]));
     });
     c.appendChild(el('div', { cls: 'r2' }, [btn('+ New campaign', () => { edModalClose(); const cp = newCampaign(); edLoad(eid('d'), cp); edChange(); })]));
     c.appendChild(el('div', { cls: 'r2' }, [btn('Copy Chapter 1 to edit', () => { edModalClose(); const d0 = buildDefault(); d0.name = 'Copy of ' + d0.name; edLoad(eid('d'), d0); edChange(); })]));
-    c.appendChild(el('div', { cls: 'r2' }, [btn('Import (paste backup)', edImport), btn('Export this campaign', edExport), btn('Art & music', edAssets)]));
+    c.appendChild(el('div', { cls: 'r2' }, [btn('Import (paste backup)', edImport), btn('Export this campaign', edExport)]));
+    c.appendChild(el('div', { cls: 'r2' }, [btn('Art library', edAssets), btn('Version history', edHistory)]));
     c.appendChild(el('div', { cls: 'r2' }, [btn('Close', () => { edModalClose(); if (!ED.camp) { showScreen('camp'); storyOpen(); } })]));
   });
 }
@@ -3034,26 +3252,67 @@ function edImport() {
     c.appendChild(msg);
   });
 }
+function edFileData(kind, file, cb) {
+  if (kind === 'music') { if (file.size > 6e6) { edStatus('Music over 6 MB, use a shorter file'); cb(null); return; } const r = new FileReader(); r.onload = () => cb(r.result); r.onerror = () => cb(null); r.readAsDataURL(file); }
+  else resizeTo(file, kind, cb);
+}
+function edUploadMany(kind, done) {
+  const f = document.createElement('input'); f.type = 'file'; f.accept = kind === 'music' ? 'audio/*' : 'image/*'; f.multiple = true;
+  f.onchange = () => {
+    const files = Array.prototype.slice.call(f.files || []); if (!files.length) return;
+    let left = files.length;
+    files.forEach(file => {
+      const nm = file.name.replace(/\.[^.]+$/, '').slice(0, 30);
+      edFileData(kind, file, d => { if (d) ED.camp.assets[eid('a')] = { name: nm, kind, d }; if (--left === 0) { edChange(); done(); } });
+    });
+  };
+  f.click();
+}
+function edReplaceArt(id) {
+  const a = ED.camp.assets[id]; if (!a) return;
+  const f = document.createElement('input'); f.type = 'file'; f.accept = a.kind === 'music' ? 'audio/*' : 'image/*';
+  f.onchange = () => { const file = f.files && f.files[0]; if (!file) return; edFileData(a.kind, file, d => { if (d) { a.d = d; edChange(); edRender(); } edAssets(); }); };
+  f.click();
+}
+// art library: everything uploaded to this campaign in one place. Art with the same Character name and different Expression labels
+// can be swapped mid-scene with an "expression" cue.
 function edAssets() {
   if (!ED.camp) { edStatus('Open a campaign first'); return; }
+  const usage = id => JSON.stringify(ED.camp.nodes).split('"a:' + id + '"').length - 1;
   edModalOpen(c => {
-    c.appendChild(el('h3', { text: 'Art & music' }));
-    const ids = Object.keys(ED.camp.assets);
-    if (!ids.length) c.appendChild(el('div', { text: 'Nothing uploaded yet. Upload art from a scene’s background or character picker.', style: 'opacity:.7;margin:6px 0' }));
-    ids.forEach(id => {
-      const a = ED.camp.assets[id];
-      const th = a.kind === 'music' ? el('div', { text: '♪', style: 'width:34px;text-align:center;font-size:20px' }) : el('img', { cls: 'thumb', src: a.d });
-      c.appendChild(el('div', { cls: 'card2 r2' }, [th, inp(a.name, v => { a.name = v; edChange(); }), el('span', { text: a.kind + ' ' + Math.round(a.d.length / 1365) + 'KB', style: 'opacity:.6;font-size:11px;flex:none' }), btn('✕', () => { delete ED.camp.assets[id]; edChange(); edAssets(); }, 'red')]));
+    c.appendChild(el('h3', { text: 'Art & music library' }));
+    c.appendChild(el('div', { text: 'Upload once, use anywhere. Give several pieces of character art the same Character name and different Expression labels (happy, angry, hurt), then add a “Change expression” cue to a line to swap faces.', style: 'opacity:.75;font-size:12px;margin-bottom:6px' }));
+    [['bg', 'Backgrounds'], ['char', 'Characters'], ['music', 'Music']].forEach(sec => {
+      const kind = sec[0], ids = Object.keys(ED.camp.assets).filter(id => ED.camp.assets[id].kind === kind);
+      if (kind === 'char') ids.sort((x, y) => String(ED.camp.assets[x].group || '~').localeCompare(String(ED.camp.assets[y].group || '~')));
+      c.appendChild(el('div', { cls: 'r2', style: 'margin-top:10px' }, [el('b', { text: sec[1] + ' (' + ids.length + ')', style: 'flex:1' }), btn('⬆ Upload (several at once)', () => edUploadMany(kind, edAssets), 'go')]));
+      ids.forEach(id => {
+        const a = ED.camp.assets[id], u = usage(id);
+        const th = kind === 'music' ? el('div', { text: '♪', style: 'width:34px;text-align:center;font-size:20px' }) : el('img', { cls: 'thumb', src: a.d });
+        const card = el('div', { cls: 'card2' });
+        card.appendChild(el('div', { cls: 'r2' }, [th, inp(a.name, v => { a.name = v; edChange(); }), el('span', { text: Math.round(a.d.length / 1365) + 'KB · used ' + u + '×', style: 'opacity:.6;font-size:11px;flex:none' })]));
+        if (kind === 'char') {
+          const gi = inp(a.group || '', v => { a.group = v; edChange(); }), ti = inp(a.tag || '', v => { a.tag = v; edChange(); });
+          gi.placeholder = 'Character (e.g. Penny)'; ti.placeholder = 'Expression (e.g. angry)';
+          card.appendChild(el('div', { cls: 'r2' }, [gi, ti]));
+        }
+        let armed = false;
+        const del = btn('Delete', () => { if (u && !armed) { armed = true; del.textContent = 'Used ' + u + '×, tap again'; return; } delete ED.camp.assets[id]; edChange(); edMarkLint(); edAssets(); }, 'red');
+        card.appendChild(el('div', { cls: 'r2' }, [btn('Replace image/file', () => edReplaceArt(id)), del]));
+        c.appendChild(card);
+      });
     });
-    c.appendChild(el('div', { cls: 'r2' }, [btn('Back', edFiles)]));
+    c.appendChild(el('div', { cls: 'r2', style: 'margin-top:10px' }, [btn('Back', edFiles)]));
   });
 }
 function edTest(id) {
   if (!ED.camp) return;
-  edSave(); const copy = JSON.parse(JSON.stringify(ED.camp)); copy.pid = 'draft';
+  edCommit(); edHistAdd('Before test'); edSave(); const copy = JSON.parse(JSON.stringify(ED.camp)); copy.pid = 'draft';
   storyBegin(copy, id && copy.nodes[id] ? id : copy.start, { test: true });
 }
 $('edFileBtn').onclick = edFiles;
+$('edUndo').onclick = edUndo; $('edRedo').onclick = edRedo; $('edVarBtn').onclick = edVars; $('edChkBtn').onclick = edCheck;
+$('edBackTest').onclick = () => leaveToMenu();
 $('edTestSel').onclick = () => edTest(ED.sel || 'start');
 $('edTestAll').onclick = () => edTest('start');
 
