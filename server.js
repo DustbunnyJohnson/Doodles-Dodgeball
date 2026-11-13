@@ -78,7 +78,8 @@ function makeCode() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZ';
   for (;;) { let s = ''; for (let i = 0; i < 4; i++) s += A[Math.floor(Math.random() * A.length)]; if (!rooms.has(s)) return s; }
 }
-const players = r => [...r.members.values()].map(m => ({ id: m.id, team: m.team }));
+const cleanNm = v => String(v == null ? '' : v).replace(/[^\w \-.!?]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12);
+const players = r => [...r.members.values()].map(m => ({ id: m.id, team: m.team, nm: m.nm || '' }));
 const teamCount = (r, t) => [...r.members.values()].filter(m => m.team === t).length;
 function lobby(r) { const msg = { t: 'lobby', size: r.size, players: players(r) }; for (const m of r.members.values()) send(m, msg); }
 
@@ -91,7 +92,7 @@ function onText(c, text) {
       if (r) return;
       const size = Math.min(3, Math.max(1, m.size | 0 || 1));
       const code = makeCode(), room = { code, size, host: c, members: new Map(), started: false };
-      c.id = 0; c.team = 0; c.room = room; room.members.set(0, c); rooms.set(code, room);
+      c.id = 0; c.team = 0; c.nm = cleanNm(m.nm); c.room = room; room.members.set(0, c); rooms.set(code, room);
       send(c, { t: 'created', code, id: 0 }); lobby(room); return;
     }
     case 'join': {
@@ -103,7 +104,7 @@ function onText(c, text) {
       let id = 1; while (room.members.has(id)) id++;
       const t1 = teamCount(room, 1), t0 = teamCount(room, 0);
       c.team = t1 < room.size && t1 <= t0 ? 1 : 0;
-      c.id = id; c.room = room; room.members.set(id, c);
+      c.id = id; c.nm = cleanNm(m.nm); c.room = room; room.members.set(id, c);
       send(c, { t: 'joined', code: room.code, id }); lobby(room); return;
     }
     case 'size': {
